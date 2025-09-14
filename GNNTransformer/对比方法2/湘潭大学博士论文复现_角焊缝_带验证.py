@@ -376,53 +376,53 @@ def extract_laser_roi(img_path,
 
     #################### 新增离群点处理方法 ####################
     # 保存滤波前的原始点用于可视化对比
-    raw_left = left_centers_global.copy()
-    raw_right = right_centers_global.copy()
+    # raw_left = left_centers_global.copy()
+    # raw_right = right_centers_global.copy()
 
     # 执行中值滤波
-    if len(left_centers_global) > 3:
-        left_centers_global = median_filter_points(left_centers_global, window_size=9)
-    if len(right_centers_global) > 3:
-        right_centers_global = median_filter_points(right_centers_global, window_size=9)
+    # if len(left_centers_global) > 3:
+    #     left_centers_global = median_filter_points(left_centers_global, window_size=9)
+    # if len(right_centers_global) > 3:
+    #     right_centers_global = median_filter_points(right_centers_global, window_size=9)
 
     # 新增可视化代码
-    if show_visualization:
-        plt.figure(figsize=(12, 6))
+    # if show_visualization:
+    #     plt.figure(figsize=(12, 6))
 
-        # 子图1：左侧中心点对比
-        plt.subplot(1, 2, 1)
-        plt.imshow(img, cmap='gray')
-        # 绘制原始点（蓝色）
-        if len(raw_left) > 0:
-            x_raw = [p[0] for p in raw_left]
-            y_raw = [p[1] for p in raw_left]
-            plt.scatter(x_raw, y_raw, c='blue', s=30, marker='x', label='Raw Points')
-        # 绘制滤波后点（红色）
-        if len(left_centers_global) > 0:
-            x_filt = [p[0] for p in left_centers_global]
-            y_filt = [p[1] for p in left_centers_global]
-            plt.scatter(x_filt, y_filt, c='red', s=50, edgecolors='white', label='Filtered')
-        plt.title("Left Centers Comparison")
-        plt.legend()
+    #     # 子图1：左侧中心点对比
+    #     plt.subplot(1, 2, 1)
+    #     plt.imshow(img, cmap='gray')
+    #     # 绘制原始点（蓝色）
+    #     if len(raw_left) > 0:
+    #         x_raw = [p[0] for p in raw_left]
+    #         y_raw = [p[1] for p in raw_left]
+    #         plt.scatter(x_raw, y_raw, c='blue', s=30, marker='x', label='Raw Points')
+    #     # 绘制滤波后点（红色）
+    #     if len(left_centers_global) > 0:
+    #         x_filt = [p[0] for p in left_centers_global]
+    #         y_filt = [p[1] for p in left_centers_global]
+    #         plt.scatter(x_filt, y_filt, c='red', s=50, edgecolors='white', label='Filtered')
+    #     plt.title("Left Centers Comparison")
+    #     plt.legend()
 
-        # 子图2：右侧中心点对比
-        plt.subplot(1, 2, 2)
-        plt.imshow(img, cmap='gray')
-        # 绘制原始点（蓝色）
-        if len(raw_right) > 0:
-            x_raw = [p[0] for p in raw_right]
-            y_raw = [p[1] for p in raw_right]
-            plt.scatter(x_raw, y_raw, c='blue', s=30, marker='x', label='Raw Points')
-        # 绘制滤波后点（红色）
-        if len(right_centers_global) > 0:
-            x_filt = [p[0] for p in right_centers_global]
-            y_filt = [p[1] for p in right_centers_global]
-            plt.scatter(x_filt, y_filt, c='red', s=50, edgecolors='white', label='Filtered')
-        plt.title("Right Centers Comparison")
-        plt.legend()
+    #     # 子图2：右侧中心点对比
+    #     plt.subplot(1, 2, 2)
+    #     plt.imshow(img, cmap='gray')
+    #     # 绘制原始点（蓝色）
+    #     if len(raw_right) > 0:
+    #         x_raw = [p[0] for p in raw_right]
+    #         y_raw = [p[1] for p in raw_right]
+    #         plt.scatter(x_raw, y_raw, c='blue', s=30, marker='x', label='Raw Points')
+    #     # 绘制滤波后点（红色）
+    #     if len(right_centers_global) > 0:
+    #         x_filt = [p[0] for p in right_centers_global]
+    #         y_filt = [p[1] for p in right_centers_global]
+    #         plt.scatter(x_filt, y_filt, c='red', s=50, edgecolors='white', label='Filtered')
+    #     plt.title("Right Centers Comparison")
+    #     plt.legend()
 
-        plt.tight_layout()
-        plt.show()
+    #     plt.tight_layout()
+    #     plt.show()
 
     # 使用中值滤波对中心点进行过滤之后，会将部分严重的离群点进行滤出，但是随之而来的负面影响就是对条纹线端点处的中心点也滤掉了
     # 为此我们添加补救措施，以左侧点为例，我们拿出过滤之后的中心点中的最右侧点filtered_r_current_point，以这个点为圆心，绘制一个半圆范围，该半圆只有右半部分，
@@ -431,20 +431,20 @@ def extract_laser_roi(img_path,
     # 半圆之内的点。再次以新的filtered_r_current_point建立右半圆判断右侧是否还有中心点存在。直到一个filtered_r_current_point的右半圆中没有中心点落在内。
     # 这个时候就证明此时的filtered_r_current_point是条纹激光线真正的右端点。
 
-    # 左侧点补偿（向右搜索）
-    left_centers_global = recover_endpoints(
-        left_centers_global, raw_left, 'left',
-        img=img,  # 传入原始图像
-        roi=(roi_col_start, roi_col_end, roi_row_start, roi_row_end),
-        debug_plot=show_visualization
-    )
-    # 右侧点补偿 (向左搜索)
-    right_centers_global = recover_endpoints(
-        right_centers_global, raw_right, 'right',
-        img=img,
-        roi=(roi_col_start, roi_col_end, roi_row_start, roi_row_end),
-        debug_plot=show_visualization
-    )
+    # # 左侧点补偿（向右搜索）
+    # left_centers_global = recover_endpoints(
+    #     left_centers_global, raw_left, 'left',
+    #     img=img,  # 传入原始图像
+    #     roi=(roi_col_start, roi_col_end, roi_row_start, roi_row_end),
+    #     debug_plot=show_visualization
+    # )
+    # # 右侧点补偿 (向左搜索)
+    # right_centers_global = recover_endpoints(
+    #     right_centers_global, raw_right, 'right',
+    #     img=img,
+    #     roi=(roi_col_start, roi_col_end, roi_row_start, roi_row_end),
+    #     debug_plot=show_visualization
+    # )
 
     # 拼接修复后的中心点
     all_centers = []
@@ -548,11 +548,11 @@ def main():
     # 调用对比方法2的核心函数
     roi_coords, intersection_point = extract_laser_roi(
         image_path,
-        col1th=80, col2th=80,
-        row1th=60, row2th=60,
+        col1th=600, col2th=600,
+        row1th=600, row2th=600,
         median_ksize=3,
         thresh_val=120,
-        show_visualization=False  # 关闭可视化以提高速度
+        show_visualization=True  # 关闭可视化以提高速度
     )
     # 记录结束时间
     end_time = time.perf_counter()
