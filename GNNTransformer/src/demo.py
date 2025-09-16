@@ -2,22 +2,22 @@
 焊缝点检测推理代码
 zhh 20250901
 """
-from GNNTransformer.SecondCode.里程碑代码.train_topo_0903 import *
+from GNNTransformer.src.train import *
 
 
 # 加载训练好的模型
 def load_model(model_path, device):
     """加载训练好的模型"""
-    from GNNTransformer.SecondCode.里程碑代码.train_topo import WeldPointRegressionHGTNet  # 确保模型定义可用
 
     # 初始化模型（使用与训练相同的参数）
     model = WeldPointRegressionHGTNet(
-        node_dim=8,  # 节点特征维度，这一项与节点特征直接相关，应该配合节点特征数量进行修改
+        node_dim=7,  # 节点特征维度，这一项与节点特征直接相关，应该配合节点特征数量进行修改
         edge_dim=4,  # 边特征维度，这一项与节点特征直接相关，应该配合节点特征数量进行修改
-        hidden_dim=256,
-        num_layers=3,
-        num_heads=8,
-        dropout=0
+        hidden_dim= hyperparams["hidden_dim"],
+        num_layers= hyperparams["num_layers"],
+        num_heads= hyperparams["num_heads"],
+        dropout= hyperparams["dropout"],
+        num_kernels=8
     ).to(device)
 
     # 加载模型权重
@@ -28,17 +28,6 @@ def load_model(model_path, device):
 
 # 推理函数
 def predict_weld_point(model, img, device):
-    """
-    预测焊缝点位置
-    :param model: 加载的模型
-    :param img: 输入图像 (BGR格式)
-    :param device: 计算设备
-    :return:
-        pred_point: 预测的焊缝点坐标 (归一化)
-        segments: 提取的激光线段
-        center_points: 中心点
-        graph: 构建的图数据
-    """
     # 获取图像尺寸
     img_height, img_width = img.shape[:2]
 
@@ -58,9 +47,15 @@ def predict_weld_point(model, img, device):
 
     # 模型推理
     with torch.no_grad():
-        node_scores, pred_point = model(data)
+        pred_point = model(data)
+        pred_point = pred_point.cpu().numpy()
 
-    return pred_point.cpu().numpy()[0], optimized_segments, center_points, graph
+    pred_x = (pred_point[0] + 1) * 0.5 * img_width
+    pred_y = (pred_point[1] + 1) * 0.5 * img_height
+
+    pred_point_output = np.array([pred_x, pred_y])
+
+    return pred_point_output, optimized_segments, center_points, graph
 
 
 # 可视化函数
@@ -189,36 +184,132 @@ def main_inference(image_path, model_path, true_point=None):
         return
 
     # 可视化结果
-    visualize_results(img, segments, center_points, pred_point, true_point)
+    # visualize_results(img, segments, center_points, pred_point, true_point)
 
-    # 返回预测点（像素坐标）
-    img_height, img_width = img.shape[:2]
-    pred_pixel = (pred_point * np.array([img_width, img_height])).astype(int)
-    print(f"Predicted weld point: ({pred_pixel[0]}, {pred_pixel[1]})")
-
-    return pred_pixel
+    return pred_point
 
 
-# 以下是训练代码中的辅助函数（需要从训练代码中复制）
-# 注意：需要复制以下函数到推理代码中：
-# - extract_laser_segments
-# - create_topology_graph
-# - VirtualNode
-# - merge_line_segments
-# - can_merge_segments
-# - merge_two_segments
-# - calculate_confidence
+def load_annotated_data(image_folder):
+    """加载标注数据"""
+    annotation_file = os.path.join(image_folder, "test_annotations.json")
+    with open(annotation_file, 'r') as f:
+        annotations = json.load(f)
+
+    # 构建数据集: [(image_path, true_point)]
+    dataset = []
+    for img_file, points in annotations.items():
+        img_path = os.path.join(image_folder, img_file)
+        if points:  # 只使用有标注的图像
+            # 使用第一个标注点作为焊缝点
+            true_point = np.array(points[0])
+            dataset.append((img_path, true_point))
+
+    return dataset
+
+def prepare_dataset(image_folder):
+    """准备数据集"""
+    # 加载标注数据
+    dataset = load_annotated_data(image_folder)
+    data = []
+    target_size = (896, 400)
+
+    for img_path, true_point in tqdm(dataset, desc="Processing images"):
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"Warning: Could not read image {img_path}. Skipping.")
+            continue
+
+        orig_h, orig_w = img.shape[:2]
+        img = cv2.resize(img, target_size, interpolation=cv2.INTER_LINEAR)
+        scale_x = target_size[0] / orig_w
+        scale_y = target_size[1] / orig_h
+
+        true_point = np.array([
+            int(true_point[0] * scale_x),
+            int(true_point[1] * scale_y)
+        ])
+        data.append((img, true_point))
+
+    return data
 
 # 示例使用
 if __name__ == "__main__":
+    hyperparams = {
+        "batch_size": 8,
+        "learning_rate": 0.001,
+        "weight_decay": 1e-4,
+        "hidden_dim": 256,
+        "num_layers": 3,
+        "num_heads": 8,
+        "dropout": 0,
+        "num_epochs": 800,
+        "lr_factor": 0.5,
+        "lr_patience": 10,
+        "min_lr": 1e-6,
+        "grad_clip": 1.0,
+        "image_folder": "/home/z/seam_tracking_ws/src/paper1_pkg/GNNTransformer/SecondCode/train_data"
+    }
+
     # 模型路径
     model_path = "training_logs_20250904-114247/weld_hgt_model.pth"
 
     # 测试图像路径
-    image_path = "/home/z/seam_tracking_ws/src/paper1_pkg/GNNTransformer/SecondCode/train_data/25051928-0061-OFF.png"
+    dataset_path = "GNNTransformer/datasets"
+    test_data = prepare_dataset(dataset_path)
+    euclidean_distances = []  # 欧式距离（像素误差）
+    x_errors = []             # X坐标误差
+    y_errors = []             # Y坐标误差
+    undetected_count = 0      # 未检测到的图像数量
+    for img, true_point in test_data:
+        # 运行推理
+        weld_point =main_inference(img, model_path, true_point)
+        if weld_point:
+            pred_point = weld_point
+            # pred_point(x,y)
+            euclidean_dist = np.sqrt((pred_point[0] - true_point[0])**2 + (pred_point[1] - true_point[1])**2)
+            euclidean_distances.append(euclidean_dist)
 
-    # 真实焊缝点（如果有）
-    true_point = [910, 395]  # 示例坐标
-
-    # 运行推理
-    main_inference(image_path, model_path, true_point)
+            # 计算X坐标误差
+            x_error = abs(pred_point[0] - true_point[0])
+            x_errors.append(x_error)
+            # 计算Y坐标误差
+            y_error = abs(pred_point[1] - true_point[1])
+            y_errors.append(y_error)
+        else:
+            undetected_count+=1
+            print(f"Warning: No weld points detected in image with true point at {true_point}")
+    if euclidean_distances:
+        # 欧式距离统计
+        mean_euclidean = np.mean(euclidean_distances)
+        median_euclidean = np.median(euclidean_distances)
+        min_euclidean = np.min(euclidean_distances)
+        max_euclidean = np.max(euclidean_distances)
+        # X坐标MAE和RMSE
+        x_mae = np.mean(x_errors)
+        x_rmse = np.sqrt(np.mean(np.square(x_errors)))
+        
+        # Y坐标MAE和RMSE
+        y_mae = np.mean(y_errors)
+        y_rmse = np.sqrt(np.mean(np.square(y_errors)))
+        
+        # 打印评估结果
+        print("\n" + "="*50)
+        print("焊缝检测评估结果")
+        print("="*50)
+        print(f"测试图像总数: {len(test_data)}")
+        print(f"成功检测的图像数: {len(euclidean_distances)}")
+        print(f"未检测到的图像数: {undetected_count}")
+        print("\n欧式距离（像素误差）统计:")
+        print(f"  平均值: {mean_euclidean:.2f} 像素")
+        print(f"  中位数: {median_euclidean:.2f} 像素")
+        print(f"  最小值: {min_euclidean:.2f} 像素")
+        print(f"  最大值: {max_euclidean:.2f} 像素")
+        print("\nX坐标误差统计:")
+        print(f"  MAE: {x_mae:.2f} 像素")
+        print(f"  RMSE: {x_rmse:.2f} 像素")
+        print("\nY坐标误差统计:")
+        print(f"  MAE: {y_mae:.2f} 像素")
+        print(f"  RMSE: {y_rmse:.2f} 像素")
+        print("="*50)
+    else:
+        print("警告：没有成功检测到任何焊缝点，无法计算评估指标")

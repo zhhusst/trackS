@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import math
-
+from scipy.ndimage import rotate
 from imageio import imread
 from scipy.ndimage import maximum_filter
 from scipy.signal import convolve2d
@@ -15,15 +15,6 @@ from tqdm import tqdm
 
 class WeldDetector:
     def __init__(self, R=50, theta=5, threshold=0.6, angle_range=(110, 170), Ts=100, n=10,epsilon=80, angleA_min=180,angleA_max = 270,angleB_min = 270,angleB_max = 360):
-        """
-        初始化焊缝检测器
-        参数:
-            R: 卷积核半径 (默认50)
-            theta: 角度步长 (默认5度)
-            threshold: 似然图阈值 (默认0.6)
-            angle_range: 焊缝角度范围 (默认110-170度)
-            Ts: 强度累积阈值 (默认100)
-        """
         self.R = R  # 卷积核半径
         self.theta = theta  # 卷积核中每条线的宽度夹角
         self.threshold = threshold  # 对图像进行卷积之后的筛选时的阈值
@@ -39,25 +30,127 @@ class WeldDetector:
         # 生成卷积核
         self.kernels = self._generate_kernels()
 
+    def visualize_kernels(self, base_kernels, rotation_angles):
+            """
+            可视化基础卷积核及其旋转版本
+            
+            参数:
+                base_kernels: 基础卷积核列表
+                rotation_angles: 旋转角度列表
+            """
+            # 选择前几个基础核进行可视化
+            num_base_to_show = min(3, len(base_kernels))
+            num_rotations_to_show = min(4, len(rotation_angles))
+            
+            # 创建大图
+            fig, axes = plt.subplots(num_base_to_show, num_rotations_to_show + 1, 
+                                    figsize=(15, 10),
+                                    squeeze=False)
+            fig.suptitle("卷积核及其旋转版本可视化", fontsize=16)
+            
+            for i in range(num_base_to_show):
+                kernel = base_kernels[i]
+                
+                # 显示原始核
+                ax = axes[i, 0]
+                ax.imshow(kernel, cmap='coolwarm', vmin=-np.max(np.abs(kernel)), vmax=np.max(np.abs(kernel)))
+                ax.set_title(f"yuanshihe {i+1}")
+                ax.axis('off')
+                
+                # 显示旋转版本
+                for j, rot_angle in enumerate(rotation_angles[:num_rotations_to_show]):
+                    # 旋转卷积核（顺时针旋转）
+                    rotated_kernel = rotate(kernel, rot_angle, reshape=False, mode='constant', cval=0)
+                    
+                    # 裁剪回原始尺寸
+                    center = np.array(kernel.shape) // 2
+                    start = center - self.R
+                    end = center + self.R + 1
+                    rotated_kernel = rotated_kernel[start[0]:end[0], start[1]:end[1]]
+                    
+                    # 归一化旋转后的核
+                    # rotated_kernel = rotated_kernel / np.max(np.abs(rotated_kernel))
+                    
+                    ax = axes[i, j+1]
+                    ax.imshow(rotated_kernel, cmap='coolwarm', 
+                            vmin=-np.max(np.abs(rotated_kernel)), 
+                            vmax=np.max(np.abs(rotated_kernel)))
+                    ax.set_title(f"旋转 {rot_angle}°")
+                    ax.axis('off')
+            
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.92)
+            # plt.savefig("kernel_visualization.png", dpi=150, bbox_inches='tight')
+            plt.show()
+    def visualize_rotated_kernel(self, original_kernel, rotated_kernel, rotation_angle):
+        """可视化旋转后的卷积核"""
+        fig, axes = plt.subplots(1, 2, figsize=(15, 5))
+        
+        # 原始卷积核
+        axes[0].imshow(original_kernel, cmap='coolwarm', 
+                      vmin=-np.max(np.abs(original_kernel)), 
+                      vmax=np.max(np.abs(original_kernel)))
+        axes[0].set_title("ori")
+        axes[0].axis('off')
+        
+        # 旋转后的卷积核
+        axes[1].imshow(rotated_kernel, cmap='coolwarm', 
+                      vmin=-np.max(np.abs(rotated_kernel)), 
+                      vmax=np.max(np.abs(rotated_kernel)))
+        axes[1].set_title(f"rotated {rotation_angle}° conv")
+        axes[1].axis('off')
+        
+        plt.suptitle(f"conv {rotation_angle}° visual", fontsize=16)
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.85)
+        plt.savefig(f"rotated_kernel_{rotation_angle}.png", dpi=150, bbox_inches='tight')
+        plt.show()
+
     def _generate_kernels(self):
-        """生成多角度卷积核组"""
         kernels = []
         start_angle, end_angle = self.angle_range
         n_angles = int((end_angle - start_angle) / self.theta) + 1
-
+        
+        base_kernels = []
         for i in range(n_angles):
-            angle = start_angle + i * self.theta
+            angle = start_angle+i*self.theta
             kernel = self._create_single_kernel(angle)
             if kernel is not None:  # 忽略无效核
-                kernels.append(kernel)
+                base_kernels.append(kernel)
+        rotation_angles = np.arange(0, -50, -10)  # 0°到90°，步长10°
+        
+        # 可视化卷积核
+        # self.visualize_kernels(base_kernels, rotation_angles)
+
+        for kernel in base_kernels:
+            kernels.append(kernel)  # 添加原始核
+            
+            # 添加旋转版本
+            for rot_angle in rotation_angles:
+                if rot_angle == 0:  # 跳过0度旋转（已经是原始核）
+                    continue
+                    
+                # 旋转卷积核（顺时针旋转）
+                rotated_kernel = rotate(kernel, rot_angle, reshape=False, mode='constant', cval=0)
+                
+                # 裁剪回原始尺寸（旋转可能会改变尺寸）
+                center = np.array(kernel.shape) // 2
+                start = center - self.R
+                end = center + self.R + 1
+                rotated_kernel = rotated_kernel[start[0]:end[0], start[1]:end[1]]
+                kernels.append(rotated_kernel)
+                # self.visualize_rotated_kernel(kernel, rotated_kernel, rot_angle)
+
+
+        # for i in range(n_angles):
+        #     angle = start_angle + i * self.theta
+        #     kernel = self._create_single_kernel(angle)
+        #     if kernel is not None:  # 忽略无效核
+        #         kernels.append(kernel)
 
         return kernels
 
     def _create_single_kernel(self, alpha):
-        """
-        创建单个角度的卷积核
-        修复了除零错误并添加了数值稳定性
-        """
         size = 2 * self.R + 1
         center = (self.R+1, self.R+1)
         kernel = np.zeros((size, size))
@@ -115,10 +208,6 @@ class WeldDetector:
         return kernel
 
     def compute_likelihood_map(self, img):
-        """
-        计算焊缝似然图
-        优化了卷积速度
-        """
         # 转换为浮点型以便计算
         if img.dtype != np.float32:
             img_float = img.astype(np.float32) / 255.0
@@ -146,10 +235,6 @@ class WeldDetector:
         return likelihood_map
 
     def non_maxima_suppression(self, likelihood_map):
-        """
-        非极大值抑制提取候选点
-        严格按照流程图实现
-        """
         # 获取参数
         n = self.n  # 邻域半径，需要在类初始化时设置
         T = self.threshold  # 阈值
@@ -209,12 +294,12 @@ class WeldDetector:
 
     def cumulative_intensity(self, ImgE, center_y, center_x):
         h, w = ImgE.shape
-        angles = np.arange(0,360,20)
+        angles = np.arange(0,360,5)
         Cf = np.zeros_like(angles,dtype=np.float32)
         angles_rads = np.deg2rad(angles)
 
         for i, angle_rad in enumerate(angles_rads):
-            for r in range(1, 50):
+            for r in range(1, int(h/2)):
                 dx = int(r * np.cos(angle_rad))  # 列
                 dy = int(r * np.sin(angle_rad))  # 行
                 x=center_x+dx
@@ -225,17 +310,6 @@ class WeldDetector:
         return angles, Cf
 
     def intercept_neighborhood(self, image, center_y, center_x):
-        """
-        截取以候选点为中心的邻域图像
-
-        参数:
-            image: 原始图像
-            center_x: 候选点x坐标
-            center_y: 候选点y坐标
-
-        返回:
-            Img0: 截取的邻域图像
-        """
         h, w = image.shape
         x_min = max(0, center_x - self.R)
         x_max = min(w, center_x + self.R + 1)
@@ -255,17 +329,6 @@ class WeldDetector:
         return Img0
 
     def find_two_largest_peaks(self, Cf, angles):
-        """
-        找到累积强度中的两个最大峰值及其角度
-
-        参数:
-            Cf: 累积强度数组
-            angles: 角度数组
-
-        返回:
-            Cf1, Cf2: 两个最大峰值的强度
-            Angle1, Angle2: 两个最大峰值对应的角度
-        """
         # 使用scipy的find_peaks函数找到所有峰值
         # peaks, _ = find_peaks(Cf, prominence=self.Ts / 2)
         peaks, _ = find_peaks(Cf)
@@ -346,7 +409,7 @@ class WeldDetector:
             plt.suptitle("Angle Analysis for Candidate Point", fontsize=14)
 
         plt.tight_layout()
-        plt.savefig("angle_visualization.png", dpi=150, bbox_inches='tight')
+        # plt.savefig("angle_visualization.png", dpi=150, bbox_inches='tight')
         plt.show()
 
     def judge_candidate(self, Cf1, Cf2, Angle1, Angle2, candidate_coords=None):
@@ -354,59 +417,27 @@ class WeldDetector:
         condition1 = (self.angleA_min< Angle1 < self.angleA_max) and (Cf1 > self.Ts)
         condition2 = (self.angleB_min < Angle2 < self.angleB_max) and (Cf2 > self.Ts)
 
-        self.visualize_angles(Angle1, Angle2, Cf1, Cf2, condition1, condition2, candidate_coords)
+        # self.visualize_angles(Angle1, Angle2, Cf1, Cf2, condition1, condition2, candidate_coords)
 
         # 两个条件都必须满足
         return condition1 and condition2
 
     def reexamine_candidates(self, image, candidates, R=20, TS=100):
-        """
-        Reexamine candidates based on local structural features.
-        
-        :param image: Original image
-        :param candidates: List of (u,v)
-        :param R: Neighborhood radius
-        :param TS: Cumulative intensity threshold
-        :return: List of true fillet weld joints
-        """
         true_joints = []
         results = []
         for i, (y, x) in enumerate(candidates):  # y是行 x是列
             Img0 = self.intercept_neighborhood(image, y, x)
             ImgE = self.enhance_linear_features(Img0)
-            angles, Cf = self.cumulative_intensity(ImgE, R, R)
+            angles, Cf = self.cumulative_intensity(ImgE, int(ImgE.shape[0]/2), int(ImgE.shape[1]/2))
             Cf1,Cf2,Angle1,Angle2 = self.find_two_largest_peaks(Cf, angles)
             if Cf1 is None or Cf2 is None:
-                # 没有找到足够的峰值，不是焊缝点
-                results.append({
-                    'candidate': (y, x),  # y是行  x是列
-                    'is_weld': False,
-                    'reason': 'Insufficient peaks',
-                    'Cf1': Cf1,
-                    'Cf2': Cf2,
-                    'Angle1': Angle1,
-                    'Angle2': Angle2
-                })
                 continue
             is_weld =self.judge_candidate(Cf1, Cf2, Angle1, Angle2,
                                        candidate_coords=(y, x))
             # is_weld = True
             if is_weld:
-                true_joints.append((y, x))
-            # 保存结果用于分析
-            results.append({
-                'candidate': (x, y),
-                'is_weld': is_weld,
-                'reason': 'Judgment criteria' if is_weld else 'Does not meet criteria',
-                'Cf1': Cf1,
-                'Cf2': Cf2,
-                'Angle1': Angle1,
-                'Angle2': Angle2,
-                'Img0': Img0,
-                'ImgE': ImgE,
-                'Cf': Cf,
-                'angles': angles
-            })
+                true_joints.append((x, y))
+
         return true_joints, results
 
     def visualize_reexamination(self, result):
@@ -509,7 +540,7 @@ class WeldDetector:
         else:
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # 计算焊缝似然图
+        
         likelihood_map = self.compute_likelihood_map(gray)
         # =============== 添加似然图可视化 ===============
         # plt.figure(figsize=(12, 6))
@@ -519,28 +550,27 @@ class WeldDetector:
         # plt.imshow(gray, cmap='gray')
         # plt.title("Original Grayscale Image")
         # plt.axis('off')
-        #
+        
         # # 焊缝似然图
         # plt.subplot(122)
         # plt.imshow(likelihood_map, cmap='jet')
         # plt.colorbar(label='Probability')
         # plt.title("Weld Likelihood Map")
         # plt.axis('off')
-        #
+        
         # plt.tight_layout()
-        # # plt.savefig("weld_likelihood_map.png", dpi=150)
         # plt.show()
-        # =============== 结束可视化 ===============
+        # # =============== 结束可视化 ===============
         # 非极大值抑制获取候选点
         candidate_points = self.non_maxima_suppression(likelihood_map)
-        joints, detailed_results = self.reexamine_candidates(gray, candidate_points, 80, self.Ts)
+        joints, _ = self.reexamine_candidates(gray, candidate_points, 80, self.Ts)
 
         return joints, likelihood_map
 
 
 def load_annotated_data(image_folder):
     """加载标注数据"""
-    annotation_file = os.path.join(image_folder, "annotations.json")
+    annotation_file = os.path.join(image_folder, "test_annotations.json")
     with open(annotation_file, 'r') as f:
         annotations = json.load(f)
 
@@ -560,7 +590,7 @@ def prepare_dataset(image_folder):
     # 加载标注数据
     dataset = load_annotated_data(image_folder)
     data = []
-    target_size = (600, 600)
+    target_size = (896, 400)
 
     for img_path, true_point in tqdm(dataset, desc="Processing images"):
         img = cv2.imread(img_path)
@@ -584,62 +614,119 @@ def prepare_dataset(image_folder):
 
 def main():
     R = 50  # 卷积核半径
-    theta = 2  # 角度步长 (度)
+    theta = 10  # 角度步长 (度)
     threshold = 0.6 # 概率阈值
     angle_range = (110, 180)  # 角度范围
     Ts = 2*R  # 最后一步按照夹角进行筛选时Cf的阈值
-    n = 20  # 将图像分成的矩形块的边长
+    n = 10  # 将图像分成的矩形块的边长,该矩形框是用于非极大值抑制的。
     epsilon = 10
-    angleA_min = 180
-    angleA_max = 270
-    angleB_min = 270
-    angleB_max = 360
+    angleA_min = 185
+    angleA_max = 195
+    angleB_min = 350-5
+    angleB_max = 350+5
 
     # 读取测试数据集(测试数据集和标注数据放在一个文件夹中)
-    dataset_path = "GNNTransformer/test_dataset"
+    dataset_path = "GNNTransformer/datasets"
     test_data = prepare_dataset(dataset_path)
 
-
-    
     # 初始化检测器
     detector = WeldDetector(R, theta, threshold, angle_range,Ts,n,epsilon,angleA_min,angleA_max,angleB_min,angleB_max)
 
-    img = imread("/home/z/trackS/trackS/GNNTransformer/对比方法3/微信图片_20250915184816_281.jpg")
+    euclidean_distances = []  # 欧式距离（像素误差）
+    x_errors = []             # X坐标误差
+    y_errors = []             # Y坐标误差
+    undetected_count = 0      # 未检测到的图像数量
+    for img, true_point in test_data:
+        # 检测焊缝
+        weld_points, likelihood_map = detector.detect_welds(img)
+        # # 可视化结果
+        # plt.figure(figsize=(15, 10))
 
-    # 检测焊缝
-    weld_points, likelihood_map = detector.detect_welds(img)
+        # # 原始图像
+        # plt.subplot(221)
+        # plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        # plt.title("Original Image with Simulated Weld")
 
-    # 可视化结果
-    plt.figure(figsize=(15, 10))
+        # # 焊缝概率图
+        # plt.subplot(222)
+        # plt.imshow(likelihood_map, cmap='hot')
+        # plt.title("Weld Likelihood Map")
+        # plt.colorbar()
 
-    # 原始图像
-    plt.subplot(221)
-    plt.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
-    plt.title("Original Image with Simulated Weld")
+        # # 检测结果
+        # result_img = img.copy()
+        # for y, x in weld_points:
+        #     cv2.circle(result_img, (y, x), 5, (0, 0, 255), -1)  # 红色标记检测到的焊缝点
 
-    # 焊缝概率图
-    plt.subplot(222)
-    plt.imshow(likelihood_map, cmap='hot')
-    plt.title("Weld Likelihood Map")
-    plt.colorbar()
+        # plt.subplot(212)
+        # plt.imshow(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB))
+        # plt.title(f"Detected Weld Points: {len(weld_points)}")
 
-    # 检测结果
-    result_img = img.copy()
-    for y, x in weld_points:
-        cv2.circle(result_img, (x, y), 5, (0, 0, 255), -1)  # 红色标记检测到的焊缝点
+        # plt.tight_layout()
+        # # plt.savefig("weld_detection_result.png", dpi=300)
+        # plt.show()
 
-    plt.subplot(212)
-    plt.imshow(cv2.cvtColor(result_img, cv2.COLOR_BGR2RGB))
-    plt.title(f"Detected Weld Points: {len(weld_points)}")
+        # # 打印检测结果
+        # print(f"Detected {len(weld_points)} weld points")
+        # for i, pt in enumerate(weld_points):
+        #     print(f"Point {i + 1}: ({pt[0]}, {pt[1]})")
 
-    plt.tight_layout()
-    # plt.savefig("weld_detection_result.png", dpi=300)
-    plt.show()
+        if weld_points:
+            pred_point = weld_points[0]
+            # pred_point(x,y)
+            euclidean_dist = np.sqrt((pred_point[0] - true_point[0])**2 + (pred_point[1] - true_point[1])**2)
+            euclidean_distances.append(euclidean_dist)
 
-    # 打印检测结果
-    print(f"Detected {len(weld_points)} weld points")
-    for i, pt in enumerate(weld_points):
-        print(f"Point {i + 1}: ({pt[0]}, {pt[1]})")
+            # 计算X坐标误差
+            x_error = abs(pred_point[0] - true_point[0])
+            x_errors.append(x_error)
+            # 计算Y坐标误差
+            y_error = abs(pred_point[1] - true_point[1])
+            y_errors.append(y_error)
+        else:
+            undetected_count+=1
+            print(f"Warning: No weld points detected in image with true point at {true_point}")
+
+    if euclidean_distances:
+        # 欧式距离统计
+        mean_euclidean = np.mean(euclidean_distances)
+        median_euclidean = np.median(euclidean_distances)
+        min_euclidean = np.min(euclidean_distances)
+        max_euclidean = np.max(euclidean_distances)
+        # X坐标MAE和RMSE
+        x_mae = np.mean(x_errors)
+        x_rmse = np.sqrt(np.mean(np.square(x_errors)))
+        
+        # Y坐标MAE和RMSE
+        y_mae = np.mean(y_errors)
+        y_rmse = np.sqrt(np.mean(np.square(y_errors)))
+        
+        # 打印评估结果
+        print("\n" + "="*50)
+        print("焊缝检测评估结果")
+        print("="*50)
+        print(f"测试图像总数: {len(test_data)}")
+        print(f"成功检测的图像数: {len(euclidean_distances)}")
+        print(f"未检测到的图像数: {undetected_count}")
+        print("\n欧式距离（像素误差）统计:")
+        print(f"  平均值: {mean_euclidean:.2f} 像素")
+        print(f"  中位数: {median_euclidean:.2f} 像素")
+        print(f"  最小值: {min_euclidean:.2f} 像素")
+        print(f"  最大值: {max_euclidean:.2f} 像素")
+        print("\nX坐标误差统计:")
+        print(f"  MAE: {x_mae:.2f} 像素")
+        print(f"  RMSE: {x_rmse:.2f} 像素")
+        print("\nY坐标误差统计:")
+        print(f"  MAE: {y_mae:.2f} 像素")
+        print(f"  RMSE: {y_rmse:.2f} 像素")
+        print("="*50)
+    else:
+        print("警告：没有成功检测到任何焊缝点，无法计算评估指标")
+
+
+
+
+        
 
 
 

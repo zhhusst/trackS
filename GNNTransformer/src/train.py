@@ -30,7 +30,7 @@ np.random.seed(42)
 # 加载图像和标注
 def load_annotated_data(image_folder):
     """加载标注数据"""
-    annotation_file = os.path.join(image_folder, "annotations.json")
+    annotation_file = os.path.join(image_folder, "train_annotations.json")
     with open(annotation_file, 'r') as f:
         annotations = json.load(f)
 
@@ -293,7 +293,7 @@ def prepare_dataset(image_folder):
     # 加载标注数据
     dataset = load_annotated_data(image_folder)
     graph_data = []
-    target_size = (600, 600)
+    target_size = (896, 400)
 
     for img_path, true_point in tqdm(dataset, desc="Processing images"):
         img = cv2.imread(img_path)
@@ -586,7 +586,7 @@ def train_model():
 
     # 创建日志目录
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    log_dir = f"training_logs_{timestamp}"
+    log_dir = f"GNNTransformer/log/training_logs_{timestamp}"
     os.makedirs(log_dir, exist_ok=True)
 
     # 创建日志文件
@@ -607,7 +607,7 @@ def train_model():
         "lr_patience": 10,
         "min_lr": 1e-6,
         "grad_clip": 1.0,
-        "image_folder": "/home/z/seam_tracking_ws/src/paper1_pkg/GNNTransformer/SecondCode/train_data"
+        "image_folder": "GNNTransformer/datasets"
     }
 
     # 保存超参数到JSON文件
