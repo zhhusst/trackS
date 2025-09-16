@@ -161,6 +161,6 @@ class WeldAnnotationTool:
 
 
 if __name__ == "__main__":
-    image_folder = ""  # 修改为你的路径
+    image_folder = "1"  # 修改为你的路径
     tool = WeldAnnotationTool(image_folder)
     tool.run()
