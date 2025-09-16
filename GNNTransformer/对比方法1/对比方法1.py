@@ -208,7 +208,7 @@ def main():
     # 计算误差指标
     pixel_error, x_mae, y_mae, x_rmse, y_rmse = calculate_errors(pred_point, true_point)
     
-    # 输出结果（与您的方法格式一致）
+    # 输出结果
     print(f"Val Pixel Error: {pixel_error:.2f}px, "
           f"X MAE: {x_mae:.2f}, Y MAE: {y_mae:.2f}, "
           f"X RMSE: {x_rmse:.2f}, Y RMSE: {y_rmse:.2f}")

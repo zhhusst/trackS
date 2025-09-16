@@ -8,6 +8,10 @@ from scipy.signal import convolve2d
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 
+import json
+import os
+from tqdm import tqdm
+
 
 class WeldDetector:
     def __init__(self, R=50, theta=5, threshold=0.6, angle_range=(110, 170), Ts=100, n=10,epsilon=80, angleA_min=180,angleA_max = 270,angleB_min = 270,angleB_max = 360):
@@ -534,9 +538,51 @@ class WeldDetector:
         return joints, likelihood_map
 
 
-# =============== 示例用法 ===============
-if __name__ == "__main__":
-    # 参数设置
+def load_annotated_data(image_folder):
+    """加载标注数据"""
+    annotation_file = os.path.join(image_folder, "annotations.json")
+    with open(annotation_file, 'r') as f:
+        annotations = json.load(f)
+
+    # 构建数据集: [(image_path, true_point)]
+    dataset = []
+    for img_file, points in annotations.items():
+        img_path = os.path.join(image_folder, img_file)
+        if points:  # 只使用有标注的图像
+            # 使用第一个标注点作为焊缝点
+            true_point = np.array(points[0])
+            dataset.append((img_path, true_point))
+
+    return dataset
+
+def prepare_dataset(image_folder):
+    """准备数据集"""
+    # 加载标注数据
+    dataset = load_annotated_data(image_folder)
+    data = []
+    target_size = (600, 600)
+
+    for img_path, true_point in tqdm(dataset, desc="Processing images"):
+        img = cv2.imread(img_path)
+        if img is None:
+            print(f"Warning: Could not read image {img_path}. Skipping.")
+            continue
+
+        orig_h, orig_w = img.shape[:2]
+        img = cv2.resize(img, target_size, interpolation=cv2.INTER_LINEAR)
+        scale_x = target_size[0] / orig_w
+        scale_y = target_size[1] / orig_h
+
+        true_point = np.array([
+            int(true_point[0] * scale_x),
+            int(true_point[1] * scale_y)
+        ])
+        data.append((img, true_point))
+
+    return data
+
+
+def main():
     R = 50  # 卷积核半径
     theta = 2  # 角度步长 (度)
     threshold = 0.6 # 概率阈值
@@ -549,6 +595,12 @@ if __name__ == "__main__":
     angleB_min = 270
     angleB_max = 360
 
+    # 读取测试数据集(测试数据集和标注数据放在一个文件夹中)
+    dataset_path = "GNNTransformer/test_dataset"
+    test_data = prepare_dataset(dataset_path)
+
+
+    
     # 初始化检测器
     detector = WeldDetector(R, theta, threshold, angle_range,Ts,n,epsilon,angleA_min,angleA_max,angleB_min,angleB_max)
 
@@ -588,3 +640,9 @@ if __name__ == "__main__":
     print(f"Detected {len(weld_points)} weld points")
     for i, pt in enumerate(weld_points):
         print(f"Point {i + 1}: ({pt[0]}, {pt[1]})")
+
+
+
+if __name__ == "__main__":
+    main()
+    
