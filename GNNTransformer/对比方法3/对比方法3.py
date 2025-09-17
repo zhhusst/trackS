@@ -117,7 +117,7 @@ class WeldDetector:
             kernel = self._create_single_kernel(angle)
             if kernel is not None:  # 忽略无效核
                 base_kernels.append(kernel)
-        rotation_angles = np.arange(0, -50, -10)  # 0°到90°，步长10°
+        rotation_angles = np.arange(0, -50, -10)
         
         # 可视化卷积核
         # self.visualize_kernels(base_kernels, rotation_angles)
@@ -422,7 +422,7 @@ class WeldDetector:
         # 两个条件都必须满足
         return condition1 and condition2
 
-    def reexamine_candidates(self, image, candidates, R=20, TS=100):
+    def reexamine_candidates(self, image, candidates):
         true_joints = []
         results = []
         for i, (y, x) in enumerate(candidates):  # y是行 x是列
@@ -563,7 +563,7 @@ class WeldDetector:
         # # =============== 结束可视化 ===============
         # 非极大值抑制获取候选点
         candidate_points = self.non_maxima_suppression(likelihood_map)
-        joints, _ = self.reexamine_candidates(gray, candidate_points, 80, self.Ts)
+        joints, _ = self.reexamine_candidates(gray, candidate_points)
 
         return joints, likelihood_map
 
@@ -620,10 +620,10 @@ def main():
     Ts = 2*R  # 最后一步按照夹角进行筛选时Cf的阈值
     n = 10  # 将图像分成的矩形块的边长,该矩形框是用于非极大值抑制的。
     epsilon = 10
-    angleA_min = 185
-    angleA_max = 195
-    angleB_min = 350-5
-    angleB_max = 350+5
+    angleA_min = 190-10
+    angleA_max = 190+10
+    angleB_min = 350-10
+    angleB_max = 350+10
 
     # 读取测试数据集(测试数据集和标注数据放在一个文件夹中)
     dataset_path = "GNNTransformer/datasets"
@@ -666,10 +666,10 @@ def main():
         # # plt.savefig("weld_detection_result.png", dpi=300)
         # plt.show()
 
-        # # 打印检测结果
-        # print(f"Detected {len(weld_points)} weld points")
-        # for i, pt in enumerate(weld_points):
-        #     print(f"Point {i + 1}: ({pt[0]}, {pt[1]})")
+        # 打印检测结果
+        print(f"Detected {len(weld_points)} weld points")
+        for i, pt in enumerate(weld_points):
+            print(f"Point {i + 1}: ({pt[0]}, {pt[1]})")
 
         if weld_points:
             pred_point = weld_points[0]

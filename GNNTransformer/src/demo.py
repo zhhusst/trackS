@@ -2,7 +2,14 @@
 焊缝点检测推理代码
 zhh 20250901
 """
-from GNNTransformer.src.train import *
+from train import WeldPointRegressionHGTNet, extract_laser_segments, create_topology_graph
+import torch
+import cv2
+import numpy as np
+import os
+import json
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 # 加载训练好的模型
@@ -24,39 +31,6 @@ def load_model(model_path, device):
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.eval()
     return model
-
-
-# 推理函数
-def predict_weld_point(model, img, device):
-    # 获取图像尺寸
-    img_height, img_width = img.shape[:2]
-
-    # 提取激光线段
-    optimized_segments, center_points = extract_laser_segments(img)
-
-    # 如果没有提取到线段，返回默认值
-    if not optimized_segments:
-        print("Warning: No laser segments detected!")
-        return None, optimized_segments, center_points, None
-
-    # 构建图数据
-    graph = create_topology_graph(optimized_segments, np.array([0, 0]), img_width, img_height)
-
-    # 转换为PyG数据格式
-    data = graph.to(device)
-
-    # 模型推理
-    with torch.no_grad():
-        pred_point = model(data)
-        pred_point = pred_point.cpu().numpy()
-
-    pred_x = (pred_point[0] + 1) * 0.5 * img_width
-    pred_y = (pred_point[1] + 1) * 0.5 * img_height
-
-    pred_point_output = np.array([pred_x, pred_y])
-
-    return pred_point_output, optimized_segments, center_points, graph
-
 
 # 可视化函数
 def visualize_results(img, segments, center_points, pred_point, true_point=None):
@@ -160,35 +134,6 @@ def visualize_results(img, segments, center_points, pred_point, true_point=None)
     return vis_img
 
 
-# 主推理函数
-def main_inference(image_path, model_path, true_point=None):
-    """主推理函数"""
-    # 设置设备
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-
-    # 加载模型
-    model = load_model(model_path, device)
-
-    # 读取图像
-    img = cv2.imread(image_path)
-    if img is None:
-        print(f"Error: Could not read image {image_path}")
-        return
-
-    # 进行预测
-    pred_point, segments, center_points, graph = predict_weld_point(model, img, device)
-
-    if pred_point is None:
-        print("No prediction made.")
-        return
-
-    # 可视化结果
-    # visualize_results(img, segments, center_points, pred_point, true_point)
-
-    return pred_point
-
-
 def load_annotated_data(image_folder):
     """加载标注数据"""
     annotation_file = os.path.join(image_folder, "test_annotations.json")
@@ -206,13 +151,14 @@ def load_annotated_data(image_folder):
 
     return dataset
 
-def prepare_dataset(image_folder):
+def prepare_dataset(image_folder, display=True):
     """准备数据集"""
     # 加载标注数据
     dataset = load_annotated_data(image_folder)
     data = []
     target_size = (896, 400)
 
+    i=0
     for img_path, true_point in tqdm(dataset, desc="Processing images"):
         img = cv2.imread(img_path)
         if img is None:
@@ -230,7 +176,51 @@ def prepare_dataset(image_folder):
         ])
         data.append((img, true_point))
 
+        # 可视化部分
+        if display:
+            # 创建带标注的副本
+            img_display = img.copy()
+            
+            # 在真值点位置绘制标记
+            cv2.drawMarker(
+                img_display, 
+                tuple(true_point), 
+                color=(0, 0, 255),  # 红色标记
+                markerType=cv2.MARKER_CROSS,
+                markerSize=20,
+                thickness=2
+            )
+            
+            # 添加坐标文本信息
+            text = f"True Point: ({true_point[0]}, {true_point[1]})"
+            cv2.putText(
+                img_display,
+                text,
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (0, 255, 0),  # 绿色文字
+                2
+            )
+            
+            # 显示图像
+            cv2.imshow('Image with True Point', img_display)
+            print(i)
+            print("/n")
+            i=i+1
+            cv2.waitKey(0)  # 显示100ms后自动关闭窗口
+            cv2.destroyAllWindows()
+
     return data
+
+def prepare_test_image(img):
+    """准备单张测试图像"""
+    optimized_segments, _ = extract_laser_segments(img)
+    img_h, img_w = img.shape[:2]
+    true_point = np.array([0,0])
+    graph = create_topology_graph(optimized_segments, true_point, img_w, img_h)
+    return graph
+
 
 # 示例使用
 if __name__ == "__main__":
@@ -250,34 +240,47 @@ if __name__ == "__main__":
         "image_folder": "/home/z/seam_tracking_ws/src/paper1_pkg/GNNTransformer/SecondCode/train_data"
     }
 
-    # 模型路径
-    model_path = "training_logs_20250904-114247/weld_hgt_model.pth"
+
+    model_path = "GNNTransformer/log/training_logs_20250917-134311/final_model.pth"
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+    model = load_model(model_path, device)
+
 
     # 测试图像路径
     dataset_path = "GNNTransformer/datasets"
-    test_data = prepare_dataset(dataset_path)
+    test_data = prepare_dataset(dataset_path)  # [(img, true_point)] 图片与真实点已经被resize到统一尺寸
     euclidean_distances = []  # 欧式距离（像素误差）
     x_errors = []             # X坐标误差
     y_errors = []             # Y坐标误差
     undetected_count = 0      # 未检测到的图像数量
-    for img, true_point in test_data:
-        # 运行推理
-        weld_point =main_inference(img, model_path, true_point)
-        if weld_point:
-            pred_point = weld_point
-            # pred_point(x,y)
-            euclidean_dist = np.sqrt((pred_point[0] - true_point[0])**2 + (pred_point[1] - true_point[1])**2)
-            euclidean_distances.append(euclidean_dist)
+    for img, true_point in tqdm(test_data, desc="Processing test images"):
+        # 生成图结构
+        graph_data = prepare_test_image(img)
+        if graph_data is None:
+            print("Warning: No graph data generated. Skipping this image.")
+            undetected_count += 1
+            continue
 
-            # 计算X坐标误差
-            x_error = abs(pred_point[0] - true_point[0])
-            x_errors.append(x_error)
-            # 计算Y坐标误差
-            y_error = abs(pred_point[1] - true_point[1])
-            y_errors.append(y_error)
-        else:
-            undetected_count+=1
-            print(f"Warning: No weld points detected in image with true point at {true_point}")
+        graph_data = graph_data.to(device)
+
+        with torch.no_grad():
+            pred_point = model(graph_data)
+        
+        img_size = graph_data.img_size
+        img_size = img_size.cpu().numpy()
+        img_w, img_h = img_size
+        pred_point = pred_point.cpu().numpy()
+        pred_x = (pred_point[0][0] + 1) * 0.5 * img_w# 反归一化到像素坐标
+        pred_y = (pred_point[0][1] + 1) * 0.5 * img_h
+        
+        euclidean_dist = np.sqrt((pred_x - true_point[0])**2 + (pred_y - true_point[1])**2)
+        euclidean_distances.append(euclidean_dist)
+        x_error = abs(pred_x - true_point[0])
+        x_errors.append(x_error)
+        y_error = abs(pred_y - true_point[1])
+        y_errors.append(y_error)
+    
     if euclidean_distances:
         # 欧式距离统计
         mean_euclidean = np.mean(euclidean_distances)

@@ -21,6 +21,7 @@ import datetime
 import csv
 
 from tqdm import tqdm
+import random
 
 # 设置随机种子确保可复现性
 torch.manual_seed(42)
@@ -542,8 +543,16 @@ class WeldPointRegressionHGTNet(nn.Module):
     def forward(self, data):
         x, edge_index, edge_attr= data.x, data.edge_index, data.edge_attr
 
-        batch = data.batch if hasattr(data, 'batch') else torch.zeros(x.size(0), dtype=torch.long, device=x.device)
-        num_graphs = data.num_graphs if hasattr(data, 'num_graphs') else 1
+        # batch = data.batch if hasattr(data, 'batch') else torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+        # num_graphs = data.num_graphs if hasattr(data, 'num_graphs') else 1
+        if hasattr(data, 'batch') and data.batch is not None:
+            batch = data.batch
+            num_graphs = data.num_graphs
+        else:
+            # 单个图的情况
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+            num_graphs = 1
+
 
         spatial_feat = self.spatial_encoder(edge_index, x[:, :4])  # 只使用坐标部分
 
@@ -570,8 +579,18 @@ class WeldPointRegressionHGTNet(nn.Module):
             node_feat = x[node_mask]
             node_pool = torch.mean(node_feat, dim=0)
 
-            edge_mask = (batch[edge_index[0]] == i)
-            edge_feat = edge_attr[edge_mask]
+            # 处理边特征 - 关键修改
+            if num_graphs > 1:
+                # 批处理情况
+                edge_mask = (batch[edge_index[0]] == i)
+                edge_feat = edge_attr[edge_mask]
+            else:
+                # 单个图的情况，所有边都属于同一个图
+                edge_feat = edge_attr
+
+            # edge_mask = (batch[edge_index[0]] == i)
+            # edge_feat = edge_attr[edge_mask]
+
             edge_pool = torch.mean(edge_feat, dim=0) if edge_feat.numel() > 0 else torch.zeros_like(node_pool)
 
             combined_feat = torch.cat([node_pool, edge_pool], dim=0)
@@ -636,9 +655,18 @@ def train_model():
     print(f"Loaded {len(graph_data)} valid graphs")
 
     # 划分训练集和测试集
-    split_idx = int(0.8 * len(graph_data))
-    train_data = graph_data[:split_idx]
-    test_data = graph_data[split_idx:]
+    # split_idx = int(0.8 * len(graph_data))
+    # train_data = graph_data[:split_idx]
+    # test_data = graph_data[split_idx:]
+
+    # 计算测试集大小
+    test_size = int(0.2 * len(graph_data))
+    indices = list(range(len(graph_data)))
+    random.shuffle(indices)
+    test_indices = indices[:test_size]
+    train_indices = indices[test_size:]
+    train_data = [graph_data[i] for i in train_indices]
+    test_data = [graph_data[i] for i in test_indices]
 
     print(f"Train size: {len(train_data)}, Test size: {len(test_data)}")
 
@@ -674,7 +702,7 @@ def train_model():
         pct_start=0.1,  # 前10% epoch逐步升高到最大学习率
         anneal_strategy='cos',  # 余弦下降
         div_factor=25,  # 初始LR = max_lr / div_factor
-        final_div_factor=1e2,  # 最终LR = max_lr / final_div_factor
+        final_div_factor=1e1,  # 最终LR = max_lr / final_div_factor
     )
 
     # 训练循环
@@ -833,9 +861,13 @@ def train_model():
     plt.savefig(loss_img_save_file, dpi=300)
     plt.show()
 
+    model_save_path = os.path.join(log_dir, "final_model.pth")
+    torch.save(model.state_dict(), model_save_path)
+
     return model
 
 
 # 运行训练
 if __name__ == "__main__":
     model = train_model()
+    
